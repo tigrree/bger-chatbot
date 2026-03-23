@@ -5,6 +5,7 @@ import anthropic
 import requests
 from bs4 import BeautifulSoup
 import os
+import re
 
 app = FastAPI()
 
@@ -25,63 +26,58 @@ class ChatRequest(BaseModel):
 async def ask_bot(request: ChatRequest):
     raw_nr = request.urteilsnummer.strip()
     
-    # Wir nutzen die exakte URL-Struktur für die Druckansicht (direkter Volltext)
-    # Das überspringt die Trefferliste, die man in deinem Video sieht
-    url = "https://www.bger.ch/ext/eurospider/live/de/php/aza/http/index.php"
-    params = {
-        "lang": "de",
-        "type": "highlight_simple_query",
-        "page": "1",
-        "from_date": "",
-        "to_date": "",
-        "sort": "relevance",
-        "insertion_date": "",
-        "query_words": "",
-        "name": raw_nr  # Hier suchen wir nach 9C_512/2024
-    }
+    # Wir nutzen die URL-Logik, die auch beim Scraper funktioniert
+    # Diese steuert direkt die strukturierte Inhaltsseite an
+    url = f"https://www.bger.ch/ext/eurospider/live/de/php/aza/http/index.php?lang=de&type=highlight_simple_query&query_words=&name={raw_nr}"
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'de-CH,de;q=0.9,en-US;q=0.8,en;q=0.7'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
 
     try:
-        # Wir rufen die Seite ab
-        response = requests.get(url, params=params, headers=headers, timeout=15)
+        # Abruf mit 30 Sekunden Geduld (analog zum Scraper-Verhalten bei vielen Anfragen)
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Säuberung: Wir entfernen unnötigen Ballast
-        for element in soup(["script", "style", "nav", "header", "footer"]):
-            element.decompose()
+        # Wir entfernen Navigation und technische Skripte
+        for hidden in soup(["script", "style", "nav", "header", "footer"]):
+            hidden.decompose()
         
-        volltext = soup.get_text(separator=' ', strip=True)
+        # Extraktion des Haupttextes
+        # Wir suchen gezielt nach den Inhalts-Containern des Bundesgerichts
+        content = soup.find('div', class_='content') or soup.find('body')
+        volltext = content.get_text(separator=' ', strip=True)
 
-        # Validierung: Finden wir das Aktenzeichen im Text?
-        if len(volltext) < 1000 or raw_nr.replace("_", " ") not in volltext.replace("_", " "):
-             # Zweiter Versuch: Falls BGer eine Session-ID braucht
-             return {"antwort": f"Ich konnte den Volltext zu '{raw_nr}' nicht stabil laden. Das Bundesgericht blockiert den Zugriff aktuell. Bitte versuchen Sie es in ein paar Minuten erneut."}
+        # Sicherheitscheck: Falls der Text zu kurz ist oder das AZ fehlt
+        if len(volltext) < 800:
+            return {"antwort": f"Ich konnte den Volltext zu '{raw_nr}' nicht extrahieren. Das Bundesgericht liefert aktuell keine Daten für diese Anfrage. Bitte versuchen Sie es gleich noch einmal."}
 
-        # Claude mit der modernsten ID aufrufen
+        # Claude 3.5 Sonnet (4-6) mit dem echten Text füttern
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=3000,
+            max_tokens=3500,
             temperature=0,
             system="""Du bist ein spezialisierter Schweizer Rechtsassistent. 
             DIR LIEGT DER VOLLTEXT DES URTEILS UNTEN VOR. 
-            Antworte PRÄZISE und NUR auf Basis dieses Textes.
+            Beantworte die Frage PRÄZISE und NUR auf Basis dieses Textes.
             
-            Wichtig: Suche nach Erwägungen (E.) und Links (z.B. Charité). 
-            Wenn das Gericht CFS als Ausschlussdiagnose bezeichnet, nenne das.
-            Nutze 'ss' statt 'ß'.""",
+            REGELN:
+            1. Nenne konkrete Erwägungen (z.B. E. 4.2).
+            2. Achte auf medizinische Quellen oder Weblinks (z.B. Charité), falls erwähnt.
+            3. Falls die Information NICHT im Text steht, sage es deutlich.
+            4. Nutze konsequent 'ss' statt 'ß'.""",
             messages=[
-                {"role": "user", "content": f"Urteil: {raw_nr}\n\nText:\n{volltext}\n\nFrage: {request.frage}"}
+                {"role": "user", "content": f"Urteil: {raw_nr}\n\nInhalt:\n{volltext}\n\nFrage: {request.frage}"}
             ]
         )
         return {"antwort": message.content[0].text}
 
+    except requests.exceptions.Timeout:
+        return {"antwort": "Das Bundesgericht hat zu langsam geantwortet (Timeout). Bitte versuchen Sie es in ein paar Sekunden erneut."}
     except Exception as e:
-        return {"antwort": f"Technischer Fehler beim Abruf: {str(e)}"}
+        return {"antwort": f"Fehler beim Text-Abruf: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn
