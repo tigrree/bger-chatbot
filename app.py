@@ -5,10 +5,10 @@ import anthropic
 import requests
 from bs4 import BeautifulSoup
 import os
+import time
 
 app = FastAPI()
 
-# CORS-Einstellungen für die Kommunikation mit deiner Webseite
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -16,11 +16,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialisierung der API-Keys aus den Render-Umgebungsvariablen
-ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 SCRAPER_KEY = os.getenv("SCRAPER_API_KEY")
-
-client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
 class ChatRequest(BaseModel):
     urteilsnummer: str
@@ -29,53 +26,55 @@ class ChatRequest(BaseModel):
 @app.post("/ask")
 async def ask_bot(request: ChatRequest):
     if not SCRAPER_KEY:
-        return {"antwort": "Konfigurationsfehler: SCRAPER_API_KEY fehlt in Render."}
+        return {"antwort": "Konfigurationsfehler: SCRAPER_API_KEY fehlt."}
         
     raw_nr = request.urteilsnummer.strip()
     
-    # Ziel-URL beim Bundesgericht
-    target_url = f"https://www.bger.ch/ext/eurospider/live/de/php/aza/http/index.php?lang=de&type=highlight_simple_query&name={raw_nr}"
-    
-    # ScraperAPI-URL mit JS-Rendering und Premium-Proxys (Residential IPs)
-    proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_KEY}&url={target_url}&render=true&premium=true"
+    # Wir versuchen zwei verschiedene URL-Formate des Bundesgerichts
+    urls_to_try = [
+        f"https://www.bger.ch/ext/eurospider/live/de/php/aza/http/index.php?lang=de&type=highlight_simple_query&name={raw_nr}",
+        f"https://search.bger.ch/index.php?lang=de&type=show_document&name={raw_nr}"
+    ]
 
     volltext = ""
-    try:
-        # Abruf über den Proxy mit erhöhtem Timeout
-        response = requests.get(proxy_url, timeout=90)
+    
+    for target_url in urls_to_try:
+        # ScraperAPI mit render=true ist hier entscheidend
+        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_KEY}&url={target_url}&render=true&premium=true&country_code=ch"
         
-        if response.status_code == 401:
-            return {"antwort": "Fehler 401: Ungültiger ScraperAPI-Key. Bitte Key in Render prüfen."}
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # HTML-Bereinigung (Skripte und Navigation entfernen)
-        for element in soup(["script", "style", "nav", "header", "footer"]):
-            element.decompose()
-        
-        volltext = soup.get_text(separator=' ', strip=True)
-        
-    except Exception as e:
-        return {"antwort": f"Verbindungsfehler zum Proxy: {str(e)}"}
+        try:
+            response = requests.get(proxy_url, timeout=120) # Mehr Zeit für Schweizer IPs
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Wir löschen den Müll
+                for element in soup(["script", "style", "nav", "header", "footer"]):
+                    element.decompose()
+                
+                text_candidate = soup.get_text(separator=' ', strip=True)
+                
+                # Validierung: Finden wir Urteils-Merkmale?
+                if any(x in text_candidate for x in ["Erwägung", "Considérant", "E."]):
+                    volltext = text_candidate
+                    break # Erfolg!
+        except Exception:
+            continue # Nächste URL versuchen
 
-    # Prüfung, ob tatsächlich ein Urteil gefunden wurde
-    if not volltext or len(volltext) < 600:
-        return {"antwort": "Das Bundesgericht hat den automatischen Zugriff blockiert oder das Urteil nicht gefunden."}
+    if not volltext or len(volltext) < 800:
+        return {"antwort": "Das Bundesgericht blockiert den Zugriff weiterhin hartnäckig. Bitte stellen Sie sicher, dass die Nummer (z.B. 9C_512/2024) absolut korrekt ist. Falls ja, ist der Server in Lausanne gerade überlastet."}
 
-    # KI-Analyse durch Claude 3.5 Sonnet
+    # KI-Analyse
     try:
         message = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=3500,
             temperature=0,
-            system="Du bist ein spezialisierter Schweizer Rechtsassistent. Antworte PRÄZISE und NUR auf Basis des bereitgestellten Urteilstextes. Nutze Schweizer Rechtschreibung (ss statt ß).",
-            messages=[
-                {"role": "user", "content": f"Urteil: {raw_nr}\n\nText:\n{volltext}\n\nFrage: {request.frage}"}
-            ]
+            system="Du bist ein spezialisierter Schweizer Rechtsassistent. Antworte PRÄZISE und NUR auf Basis des bereitgestellten Textes. Nutze ss statt ß.",
+            messages=[{"role": "user", "content": f"Urteil: {raw_nr}\n\nText:\n{volltext}\n\nFrage: {request.frage}"}]
         )
         return {"antwort": message.content[0].text}
     except Exception as e:
-        return {"antwort": f"Fehler bei der KI-Analyse: {str(e)}"}
+        return {"antwort": f"Fehler bei Claude: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn
