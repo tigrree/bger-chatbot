@@ -24,43 +24,45 @@ class ChatRequest(BaseModel):
 @app.post("/ask")
 async def ask_bot(request: ChatRequest):
     raw_nr = request.urteilsnummer.strip()
-    
-    # 1. ScraperAPI Konfiguration
-    # Wir holen den Key aus den Render-Umgebungsvariablen
     S_API_KEY = os.getenv("SCRAPER_API_KEY")
     
-    # Die Ziel-URL beim Bundesgericht
+    # 1. OPTIMIERTE PROXY-URL
+    # render=true simuliert einen echten Browser
+    # premium=true nutzt hochwertige IP-Adressen (Residential)
     target_url = f"https://www.bger.ch/ext/eurospider/live/de/php/aza/http/index.php?lang=de&type=highlight_simple_query&name={raw_nr}"
-    
-    # Die Proxy-URL, die die Anfrage verschleiert
-    proxy_url = f"http://api.scraperapi.com?api_key={S_API_KEY}&url={target_url}"
+    proxy_url = f"http://api.scraperapi.com?api_key={S_API_KEY}&url={target_url}&render=true&premium=true"
 
     volltext = ""
     try:
-        # Wir senden die Anfrage über den Proxy (Timeout auf 60s erhöhen, da Proxys Zeit brauchen)
-        response = requests.get(proxy_url, timeout=60)
+        # Erhöhtes Timeout auf 90s, da Rendering und Premium-Proxys Zeit brauchen
+        response = requests.get(proxy_url, timeout=90)
+        
+        if response.status_code != 200:
+            return {"antwort": f"Fehler vom Proxy-Dienst (Status {response.status_code}). Bitte ScraperAPI-Guthaben prüfen."}
+
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Bereinigung
-        for element in soup(["script", "style", "nav", "header", "footer"]):
+        # Reinigung: Alles Unnötige entfernen
+        for element in soup(["script", "style", "nav", "header", "footer", "iframe"]):
             element.decompose()
         
+        # Wir suchen gezielt im Hauptbereich der BGer Seite
         text_candidate = soup.get_text(separator=' ', strip=True)
         
-        # Prüfung auf Inhalt
-        if any(x in text_candidate for x in ["Erwägung", "Considérant", "E."]):
+        # Strenge Prüfung auf Inhalt
+        if any(x in text_candidate for x in ["Erwägung", "Considérant", "Considerando", "E."]):
             volltext = text_candidate
         else:
-            return {"antwort": "Das Bundesgericht liefert über den Proxy aktuell keinen Volltext. Bitte prüfen Sie die Nummer."}
+            return {"antwort": "Der Text konnte geladen werden, scheint aber kein Urteil zu sein. Bitte Nummer prüfen."}
 
     except Exception as e:
-        return {"antwort": f"Proxy-Fehler: {str(e)}"}
+        return {"antwort": f"Proxy-Verbindungsfehler: {str(e)}"}
 
-    # 2. Übergabe an Claude
+    # 2. ÜBERGABE AN CLAUDE
     try:
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=3000,
+            max_tokens=3500,
             temperature=0,
             system="Du bist ein präziser Schweizer Rechtsassistent. Antworte NUR auf Basis des bereitgestellten Textes. Nutze ss statt ß.",
             messages=[
