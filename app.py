@@ -8,6 +8,7 @@ import os
 
 app = FastAPI()
 
+# CORS-Einstellungen für die Kommunikation mit deiner Webseite
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -15,7 +16,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+# Initialisierung der API-Keys aus den Render-Umgebungsvariablen
+ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
+SCRAPER_KEY = os.getenv("SCRAPER_API_KEY")
+
+client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
 class ChatRequest(BaseModel):
     urteilsnummer: str
@@ -23,55 +28,54 @@ class ChatRequest(BaseModel):
 
 @app.post("/ask")
 async def ask_bot(request: ChatRequest):
+    if not SCRAPER_KEY:
+        return {"antwort": "Konfigurationsfehler: SCRAPER_API_KEY fehlt in Render."}
+        
     raw_nr = request.urteilsnummer.strip()
-    S_API_KEY = os.getenv("SCRAPER_API_KEY")
     
-    # 1. OPTIMIERTE PROXY-URL
-    # render=true simuliert einen echten Browser
-    # premium=true nutzt hochwertige IP-Adressen (Residential)
+    # Ziel-URL beim Bundesgericht
     target_url = f"https://www.bger.ch/ext/eurospider/live/de/php/aza/http/index.php?lang=de&type=highlight_simple_query&name={raw_nr}"
-    proxy_url = f"http://api.scraperapi.com?api_key={S_API_KEY}&url={target_url}&render=true&premium=true"
+    
+    # ScraperAPI-URL mit JS-Rendering und Premium-Proxys (Residential IPs)
+    proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_KEY}&url={target_url}&render=true&premium=true"
 
     volltext = ""
     try:
-        # Erhöhtes Timeout auf 90s, da Rendering und Premium-Proxys Zeit brauchen
+        # Abruf über den Proxy mit erhöhtem Timeout
         response = requests.get(proxy_url, timeout=90)
         
-        if response.status_code != 200:
-            return {"antwort": f"Fehler vom Proxy-Dienst (Status {response.status_code}). Bitte ScraperAPI-Guthaben prüfen."}
-
+        if response.status_code == 401:
+            return {"antwort": "Fehler 401: Ungültiger ScraperAPI-Key. Bitte Key in Render prüfen."}
+        
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Reinigung: Alles Unnötige entfernen
-        for element in soup(["script", "style", "nav", "header", "footer", "iframe"]):
+        # HTML-Bereinigung (Skripte und Navigation entfernen)
+        for element in soup(["script", "style", "nav", "header", "footer"]):
             element.decompose()
         
-        # Wir suchen gezielt im Hauptbereich der BGer Seite
-        text_candidate = soup.get_text(separator=' ', strip=True)
+        volltext = soup.get_text(separator=' ', strip=True)
         
-        # Strenge Prüfung auf Inhalt
-        if any(x in text_candidate for x in ["Erwägung", "Considérant", "Considerando", "E."]):
-            volltext = text_candidate
-        else:
-            return {"antwort": "Der Text konnte geladen werden, scheint aber kein Urteil zu sein. Bitte Nummer prüfen."}
-
     except Exception as e:
-        return {"antwort": f"Proxy-Verbindungsfehler: {str(e)}"}
+        return {"antwort": f"Verbindungsfehler zum Proxy: {str(e)}"}
 
-    # 2. ÜBERGABE AN CLAUDE
+    # Prüfung, ob tatsächlich ein Urteil gefunden wurde
+    if not volltext or len(volltext) < 600:
+        return {"antwort": "Das Bundesgericht hat den automatischen Zugriff blockiert oder das Urteil nicht gefunden."}
+
+    # KI-Analyse durch Claude 3.5 Sonnet
     try:
         message = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=3500,
             temperature=0,
-            system="Du bist ein präziser Schweizer Rechtsassistent. Antworte NUR auf Basis des bereitgestellten Textes. Nutze ss statt ß.",
+            system="Du bist ein spezialisierter Schweizer Rechtsassistent. Antworte PRÄZISE und NUR auf Basis des bereitgestellten Urteilstextes. Nutze Schweizer Rechtschreibung (ss statt ß).",
             messages=[
                 {"role": "user", "content": f"Urteil: {raw_nr}\n\nText:\n{volltext}\n\nFrage: {request.frage}"}
             ]
         )
         return {"antwort": message.content[0].text}
     except Exception as e:
-        return {"antwort": f"Claude-Fehler: {str(e)}"}
+        return {"antwort": f"Fehler bei der KI-Analyse: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn
