@@ -27,42 +27,47 @@ class ChatRequest(BaseModel):
 @app.post("/ask")
 async def ask_bot(request: ChatRequest):
     if not SCRAPER_KEY:
-        return {"antwort": "Konfigurationsfehler: SCRAPER_API_KEY fehlt in Render."}
+        return {"antwort": "Konfigurationsfehler: SCRAPER_API_KEY fehlt."}
         
-    raw_nr = request.urteilsnummer.strip().replace(" ", "_")
+    # Nummer bereinigen (9C_512/2024)
+    raw_nr = request.urteilsnummer.strip()
     
-    # NEU: Wir nutzen die direkte Export-Schnittstelle des Bundesgerichts
-    # Diese liefert fast immer sofort den Volltext ohne Suchmaske
-    target_url = f"https://www.bger.ch/ext/eurospider/live/de/php/aza/http/index.php?lang=de&type=highlight_simple_query&page=1&from_date=&to_date=&sort=relevance&insertion_date=&query_words=&name={raw_nr}"
+    # Direkte Such-URL
+    target_url = f"https://www.bger.ch/ext/eurospider/live/de/php/aza/http/index.php?lang=de&type=highlight_simple_query&name={raw_nr}"
     
-    # ScraperAPI mit Rendering und Country-Code (Schweiz) falls möglich
-    proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_KEY}&url={target_url}&render=true&premium=true&country_code=de"
+    # Wir nutzen den Proxy OHNE render=true, um den Status 500 zu vermeiden.
+    # Wir fügen aber keep_headers=true hinzu, um wie ein echter Browser zu wirken.
+    proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_KEY}&url={target_url}&keep_headers=true"
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    }
 
     volltext = ""
     try:
-        response = requests.get(proxy_url, timeout=120)
+        # Timeout auf 45s, um ScraperAPI Zeit zu geben
+        response = requests.get(proxy_url, headers=headers, timeout=45)
         
         if response.status_code != 200:
-            return {"antwort": f"Proxy-Fehler: Status {response.status_code}. Bitte ScraperAPI-Guthaben prüfen."}
+            return {"antwort": f"Der Proxy-Dienst meldet Fehler {response.status_code}. Bitte versuchen Sie es in 1 Minute erneut."}
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Wir suchen gezielt nach dem Urteilskörper
-        # BGer nutzt oft Klassen wie 'content' oder 'aza-content'
-        main_content = soup.find('div', class_='content') or soup.find('body')
-        
-        if main_content:
-            for element in main_content(["script", "style", "nav", "header", "footer"]):
-                element.decompose()
-            volltext = main_content.get_text(separator=' ', strip=True)
+        # Falls das BGer eine Trefferliste zeigt, versuchen wir den ersten Link zu finden
+        # oder direkt den Body-Text zu extrahieren
+        for element in soup(["script", "style", "nav", "header", "footer"]):
+            element.decompose()
+            
+        volltext = soup.get_text(separator=' ', strip=True)
         
     except Exception as e:
         return {"antwort": f"Verbindungsfehler: {str(e)}"}
 
-    # VALIDIERUNG: Prüfen auf typische Schlagworte
-    if not volltext or not any(x in volltext for x in ["Erwägung", "Considérant", "Considerando", "E."]):
-        return {"antwort": "Das Bundesgericht verweigert aktuell den Zugriff. Bitte kopieren Sie den Text des Urteils kurz manuell hier hinein (Option 3), damit ich ihn analysieren kann."}
+    # Prüfen, ob wir Text gefunden haben
+    if not volltext or len(volltext) < 500:
+        return {"antwort": "Volltext-Extraktion fehlgeschlagen. Das Bundesgericht blockiert den automatischen Abruf. Bitte kopieren Sie den Text manuell in das Feld."}
 
+    # KI-Analyse
     try:
         message = client.messages.create(
             model="claude-sonnet-4-6",
@@ -75,7 +80,7 @@ async def ask_bot(request: ChatRequest):
         )
         return {"antwort": message.content[0].text}
     except Exception as e:
-        return {"antwort": f"Fehler bei der KI-Analyse: {str(e)}"}
+        return {"antwort": f"Claude-Fehler: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn
