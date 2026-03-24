@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import anthropic
@@ -20,7 +20,6 @@ client = anthropic.Anthropic(api_key=os.getenv(“ANTHROPIC_API_KEY”))
 class ChatRequest(BaseModel):
 urteilsnummer: str
 frage: str
-urteil_url: str = “”  # Optional: direkte URL aus urteile.json
 
 @app.get(”/ping”)
 async def ping():
@@ -33,14 +32,11 @@ async def ask_bot(request: ChatRequest):
 raw_nr = request.urteilsnummer.strip()
 
 ```
-# Direkte URL bevorzugen (aus urteile.json), sonst Suchabfrage als Fallback
-if request.urteil_url and request.urteil_url.startswith("http"):
-    url = request.urteil_url
-else:
-    url = (
-        f"https://www.bger.ch/ext/eurospider/live/de/php/aza/http/index.php"
-        f"?lang=de&type=highlight_simple_query&query_words=&name={raw_nr}"
-    )
+# Volltext direkt vom Bundesgericht abrufen
+url = (
+    f"https://www.bger.ch/ext/eurospider/live/de/php/aza/http/index.php"
+    f"?lang=de&type=highlight_simple_query&query_words=&name={raw_nr}"
+)
 
 headers = {
     "User-Agent": (
@@ -90,7 +86,7 @@ REGELN:
 1. Nenne konkrete Erwaegungen (z.B. E. 4.2).
 1. Achte auf medizinische Quellen oder Weblinks (z.B. Charite), falls erwaehnt.
 1. Falls die Information NICHT im Text steht, sage es deutlich.
-1. Nutze konsequent ‘ss’ statt ‘ss’ (kein Eszett).
+1. Nutze konsequent ‘ss’ statt Eszett.
 1. Antworte immer auf Deutsch, auch wenn das Urteil franzoesisch oder italienisch ist.”””,
    messages=[
    {
