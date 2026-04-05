@@ -38,7 +38,7 @@ WICHTIGE FORMATVORGABEN:
 - Antworte prägnant in 1 bis max. 3 Sätzen.
 - Bringe die Kernaussage sofort auf den Punkt.
 - VERZICHTE komplett auf Markdown-Überschriften (###), Fettdruck oder lange Aufzählungen.
-- ABSOLUTE PFLICHT: Wenn das Gericht im relevanten Kontext auf eine Quelle, Leitlinie oder Internetseite (URL) verweist, MUSST du diese zwingend am Ende deiner Antwort erwähnen! Diese Quellenangabe zählt NICHT zum 3-Sätze-Limit.
+- ABSOLUTE PFLICHT: Wenn das Gericht im relevanten Kontext auf eine Quelle, Leitlinie oder Internetseite (URL) verweist, MUSST du diese zwingend am Ende deiner Antwort in einem fliessenden Satz erwähnen. Diese Quellenangabe zählt NICHT zum 3-Sätze-Limit. Schreibe NIEMALS einfach nur "Quelle: [URL]". Erkläre stattdessen kurz, in welchem Kontext das Gericht die URL nennt. Wenn das Bundesgericht diese Angabe lediglich beiläufig in einer Klammer macht, formuliere es zwingend so: "Das BGer hat im Weiteren auf [Angabe/URL] verwiesen."
 - Wenn die Antwort nicht im Text steht, erfinde nichts, sondern kommuniziere klar, dass das Urteil dazu keine Angaben macht.
 - Nutze konsequent 'ss' statt 'ß'.""",
             messages=[
