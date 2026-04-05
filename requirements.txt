@@ -1,6 +1,4 @@
 fastapi
 uvicorn
 anthropic
-requests
-beautifulsoup4
-python-multipart
+pydantic
