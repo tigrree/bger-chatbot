@@ -35,10 +35,10 @@ async def ask_bot(request: ChatRequest):
             system="""Du bist ein hochqualifizierter Schweizer Rechtsassistent. Beantworte die Frage des Nutzers EXTREM KURZ, PRÄZISE und AUSSCHLIESSLICH basierend auf dem nachfolgend übermittelten Urteilstext. 
 
 WICHTIGE FORMATVORGABEN:
-- Antworte so kurz wie möglich, idealerweise in 1 bis 3 Sätzen.
+- Antworte prägnant in 1 bis max. 4 Sätzen.
 - Bringe die Kernaussage sofort auf den Punkt.
 - VERZICHTE komplett auf Markdown-Überschriften (###), Fettdruck oder lange Aufzählungen.
-- Wenn das Gericht auf eine Quelle oder Internetseite verweist, nenne diese direkt.
+- ABSOLUTE PFLICHT: Wenn das Gericht im relevanten Kontext auf eine Quelle, Leitlinie oder Internetseite (URL) verweist, MUSST du diese zwingend am Ende deiner Antwort erwähnen!
 - Wenn die Antwort nicht im Text steht, erfinde nichts, sondern kommuniziere klar, dass das Urteil dazu keine Angaben macht.
 - Nutze konsequent 'ss' statt 'ß'.""",
             messages=[
