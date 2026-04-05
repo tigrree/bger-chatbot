@@ -27,13 +27,22 @@ async def ask_bot(request: ChatRequest):
     client = anthropic.Anthropic(api_key=api_key)
 
     try:
+        # Hier nutzen wir das korrekte, aktuelle Claude 3.5 Sonnet Modell
         message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2500,
-            temperature=0.1, # Sehr niedrige Temperatur = Fokus auf Fakten, keine Halluzinationen
-            system="Du bist ein hochqualifizierter Schweizer Rechtsassistent. Beantworte die Frage des Nutzers PRÄZISE und AUSSCHLIESSLICH basierend auf dem nachfolgend übermittelten Urteilstext. Wenn die Antwort nicht im Text steht, erfinde nichts, sondern kommuniziere klar, dass das Urteil dazu keine Angaben macht. Nutze konsequent 'ss' statt 'ß'.",
+            model="claude-3-5-sonnet-latest",
+            max_tokens=500, # Reduziert für kurze, prägnante Antworten
+            temperature=0.1, # Sehr niedrige Temperatur = Fokus auf Fakten, keine Ausschweifungen
+            system="""Du bist ein hochqualifizierter Schweizer Rechtsassistent. Beantworte die Frage des Nutzers EXTREM KURZ, PRÄZISE und AUSSCHLIESSLICH basierend auf dem nachfolgend übermittelten Urteilstext. 
+
+WICHTIGE FORMATVORGABEN:
+- Antworte so kurz wie möglich, idealerweise in 1 bis 3 Sätzen.
+- Bringe die Kernaussage sofort auf den Punkt.
+- VERZICHTE komplett auf Markdown-Überschriften (###), Fettdruck oder lange Aufzählungen.
+- Wenn das Gericht auf eine Quelle oder Internetseite verweist, nenne diese direkt.
+- Wenn die Antwort nicht im Text steht, erfinde nichts, sondern kommuniziere klar, dass das Urteil dazu keine Angaben macht.
+- Nutze konsequent 'ss' statt 'ß'.""",
             messages=[
-                {"role": "user", "content": f"Hier ist der Urteilstext:\n<text>\n{request.urteil_text}\n</text>\n\nBeantworte folgende Frage ausschliesslich basierend auf diesem Text:\nFrage: {request.frage}"}
+                {"role": "user", "content": f"Hier ist der Urteilstext:\n<text>\n{request.urteil_text}\n</text>\n\nBeantworte folgende Frage extrem kurz und ohne Formatierungen ausschliesslich basierend auf diesem Text:\nFrage: {request.frage}"}
             ]
         )
         return {"antwort": message.content[0].text}
