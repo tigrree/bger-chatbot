@@ -29,7 +29,7 @@ async def ask_bot(request: ChatRequest):
     try:
         # Hier nutzen wir das korrekte, aktuelle Claude 3.5 Sonnet Modell
         message = client.messages.create(
-            model="claude-3-5-sonnet-latest",
+            model="claude-sonnet-4-6",
             max_tokens=500, # Reduziert für kurze, prägnante Antworten
             temperature=0.1, # Sehr niedrige Temperatur = Fokus auf Fakten, keine Ausschweifungen
             system="""Du bist ein hochqualifizierter Schweizer Rechtsassistent. Beantworte die Frage des Nutzers EXTREM KURZ, PRÄZISE und AUSSCHLIESSLICH basierend auf dem nachfolgend übermittelten Urteilstext. 
